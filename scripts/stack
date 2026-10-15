@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+if [ "$#" -lt 2 ]; then
+  printf 'Usage: stack CLOUD [openstack] COMMAND [ARGUMENT ...]\n' >&2
+  exit 2
+fi
+cloud="$1"
+shift
+if [ "${1:-}" = openstack ]; then
+  shift
+fi
+exec openstack --os-cloud "$cloud" "$@"

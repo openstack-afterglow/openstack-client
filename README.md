@@ -1,156 +1,68 @@
-OpenStack client
-================
+# OpenStack Cloud Shell client
 
-!["Prompt"](https://raw.githubusercontent.com/gbraad/assets/gh-pages/icons/prompt-icon-64.png)
+Maintained DMS fork of <https://gitlab.com/gbraad/openstack-client>, retaining its
+Git history at upstream commit `d332a95c8e0180d82f248cd17b6fae81e6e27b67`.
 
+The current image runs Python 3.12, OpenSSL 3 and the OpenStack CLI with Zun,
+Barbican, Designate, Heat, Magnum, Manila, Octavia, Swift, Trove and Placement
+plugins. The default user is `cloudshell` (UID/GID 1000), with a writable home
+at `/home/cloudshell`. `/bin/bash`, login shells and Zun interactive terminals
+are supported. Supply credentials at runtime through `clouds.yaml`, OpenRC or
+environment variables. No credentials are built into the image.
 
-Docker container image with the OpenStack client and 'stack' helper tool.
+## Published images
 
+Registry: `glcr.dmslab.re.kr/system/openstack/openstack-client`
 
-Registries
-----------
+| Tag | Base | Purpose |
+| --- | --- | --- |
+| `latest`, `slim` | Python 3.12 / Debian Trixie | Default Cloud Shell image |
+| `alpine` | Python 3.12 / Alpine 3.23 | Smaller alternative |
+| `sha-<commit>-slim`, `sha-<commit>-alpine` | Same bases | Commit-specific builds |
 
-### Gitlab
+CI builds Linux amd64 images, checks TLS 1.3 support, trusted certificates,
+non-root operation, writable home and 13 CLI command groups, then publishes
+successful default-branch or release-tag builds. Branch and merge-request
+pipelines build and test without publishing. Pin the published digest in
+production. Release tags also publish `<release>-<flavor>`.
 
-Automated builds are available at [GitLab](https://gitlab.com/gbraad/openstack-client)
+The inherited `alpine/`, `centos/`, `fedora/` and `ubuntu/` directories preserve
+the original 2017 recipes. The maintained build uses the root `Dockerfile`.
 
-  * Alpine:  
-    `docker pull registry.gitlab.com/gbraad/openstack-client:alpine`
-  * CentOS:  
-    `docker pull registry.gitlab.com/gbraad/openstack-client:centos`
-  * Fedora:  
-    `docker pull registry.gitlab.com/gbraad/openstack-client:fedora`
-  * Ubuntu:  
-    `docker pull registry.gitlab.com/gbraad/openstack-client:ubuntu`
+## Use
 
-
-### Docker hub
-
-Alternative [automated build](https://hub.docker.com/r/gbraad/openstack-client/)
-are available from the Docker registry.
-
-  * Alpine:  
-    `docker pull gbraad/openstack-client:alpine`
-  * CentOS:  
-    `docker pull gbraad/openstack-client:centos`
-  * Fedora:  
-    `docker pull gbraad/openstack-client:fedora`
-  * Ubuntu:  
-    `docker pull gbraad/openstack-client:ubuntu`
-
-
-Download
---------
-
-If for some reason you can not access the above registries, you can also download
-and import the images from [BinTray](https://bintray.com/gbraad/generic/docker-openstack-client)
-
-```
-docker load -i gbraad-docker-openstack-client-alpine.tar.xz
+```sh
+docker run --rm -it \
+  -v "$HOME/.config/openstack:/home/cloudshell/.config/openstack:ro" \
+  glcr.dmslab.re.kr/system/openstack/openstack-client:slim
+openstack --os-cloud mycloud server list
+stack mycloud server list
 ```
 
+For Zun, use the image digest, `command=["/bin/bash"]`, `interactive=true`,
+`tty=true`, and a tenant network that reaches OpenStack public endpoints.
+Configure registry credentials in Zun for the internal GitLab registry.
+For Horizon, set `CLOUD_SHELL_IMAGE` to the validated image reference. This
+repository supplies the standard CLI/shell runtime; application-specific
+credential bootstrap helpers are supplied by their owning application.
 
-Usage
------
+## Build and validate
 
-### Cloud configurations
-Store your `stackrc` files in a local folder called `.stack`
-
-```
-$ ls -al ~/.stack
-total 20
-drwxr-xr-x  2 ubuntu ubuntu 4096 Jun  2 06:37 .
-drwxr-xr-x 31 ubuntu ubuntu 4096 Jun 28 02:52 ..
--rw-r--r--  1 ubuntu ubuntu 1581 May 28 16:07 dreamhost
--rw-r--r--  1 ubuntu ubuntu 1646 Jun  2 06:37 trystack
-```
-
-Or place your `clouds.yaml` in `~/.config/openstack` More information about
-`clouds.yaml` can be found [here](http://docs.openstack.org/developer/python-openstackclient/configuration.html)
-
-```
-$ cat ~/.config/openstack/clouds.yaml
+```sh
+docker build -t openstack-client:local .
+docker run --rm --network none openstack-client:local openstack-client-check
+docker run --rm --network none openstack-client:local bash --login -c 'openstack --version'
 ```
 
-    clouds:
-      dreamhost:
-        auth:
-          auth_url: https://iad2.dream.io:5000/v2.0
-          project_name: dhc123456
-          username: c4pash3n1
-          password: 0p3nSt4ck
-        region_name: RegionOne
-      trystack:
-        auth:
-          auth_url: http://8.43.86.2:5000/v2.0
-          project_name: facebook89115xxxx
-          username: facebook89115xxxx
-          password: xxxxxxxxxxxxxxxxx
-        region_name: RegionOne
+Base image manifests are pinned by digest. `requirements.in` pins direct
+dependencies; `requirements.lock` pins all Python dependencies with hashes.
+Refresh the lock using uv:
 
-
-### Setup an alias
-
-Setup a local alias makes running the container a lot easier
-
-
-#### Container based on _Alpine_
-
-```
-$ alias stack='docker run -it --rm -v $PWD:/workspace -v ~/.stack:/root/.stack registry.gitlab.com/gbraad/openstack-client:alpine stack'
-$ alias openstack='docker run -it --rm -v $PWD:/workspace -v ~/.config/openstack:/root/.config/openstack registry.gitlab.com/gbraad/openstack-client:alpine openstack'
+```sh
+uv pip compile --python-version 3.12 --generate-hashes \
+  requirements.in --output-file requirements.lock
 ```
 
-
-#### Container based on _CentOS_
-
-```
-$ alias stack='docker run -it --rm -v $PWD:/workspace -v ~/.stack:/root/.stack registry.gitlab.com/gbraad/openstack-client:centos stack'
-$ alias openstack='docker run -it --rm -v $PWD:/workspace -v ~/.config/openstack:/root/.config/openstack registry.gitlab.com/gbraad/openstack-client:centos openstack'
-```
-
-
-#### Container based on _Fedora_
-
-```
-$ alias stack='docker run -it --rm -v $PWD:/workspace -v ~/.stack:/root/.stack registry.gitlab.com/gbraad/openstack-client:fedora stack'
-$ alias openstack='docker run -it --rm -v $PWD:/workspace -v ~/.config/openstack:/root/.config/openstack registry.gitlab.com/gbraad/openstack-client:fedora openstack'
-```
-
-
-#### Container based on _Ubuntu_
-
-```
-$ alias stack='docker run -it --rm -v $PWD:/workspace -v ~/.stack:/root/.stack registry.gitlab.com/gbraad/openstack-client:ubuntu stack'
-$ alias openstack='docker run -it --rm -v $PWD:/workspace -v ~/.config/openstack:/root/.config/openstack registry.gitlab.com/gbraad/openstack-client:ubuntu openstack'
-```
-
-
-### Issue command
-
-Perform a `nova list` or `openstack server list` for Trystack
-
-```
-$ stack trystack nova list
-$ stack trystack openstack server list
-```
-
-Or using `clouds.yaml`:
-```
-$ openstack --os-cloud trystack server list
-```
-
-
-Thanks
-------
-
-  * Lars Kellogg-Stedman, for releasing [OpenStack Tools](https://github.com/larsks/openstack-tools)
-  * [GitLab](https://gitlab.com/) for providing a great infrastructure
-
-
-Authors
--------
-
-| [!["Gerard Braad"](http://gravatar.com/avatar/e466994eea3c2a1672564e45aca844d0.png?s=60)](http://gbraad.nl "Gerard Braad <me@gbraad.nl>") |
-|---|
-| [@gbraad](https://twitter.com/gbraad) |
+After updating, run both CI variants and validate a temporary Zun container
+against the deployed OpenStack release, including public WSS attach and
+authenticated read-only CLI calls. Keep TLS verification enabled.
