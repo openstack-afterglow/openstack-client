@@ -20,11 +20,13 @@ Registry: `glcr.dmslab.re.kr/system/openstack/openstack-client`
 | `alpine` | Python 3.12 / Alpine 3.23 | Smaller alternative |
 | `sha-<commit>-slim`, `sha-<commit>-alpine` | Same bases | Commit-specific builds |
 
-CI builds Linux amd64 images, checks TLS 1.3 support, trusted certificates,
-non-root operation, writable home and 13 CLI command groups, then publishes
-successful default-branch or release-tag builds. Branch and merge-request
-pipelines build and test without publishing. Pin the published digest in
-production. Release tags also publish `<release>-<flavor>`.
+CI builds Linux amd64 images using Kaniko on ordinary Docker runners without
+privileged mode or a Docker daemon. Every build uploads its commit-specific
+candidate tag and dependency cache to this project's registry. Separate jobs
+run inside both images and check TLS 1.3 support, trusted certificates,
+non-root operation, writable home and 13 CLI command groups. Only after both
+tests pass are default-branch builds promoted to `slim`, `alpine` and `latest`.
+Release tags publish `<release>-<flavor>`. Pin the published digest in production.
 
 The inherited `alpine/`, `centos/`, `fedora/` and `ubuntu/` directories preserve
 the original 2017 recipes. The maintained build uses the root `Dockerfile`.

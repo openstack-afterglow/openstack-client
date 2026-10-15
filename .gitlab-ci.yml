@@ -1,4 +1,4 @@
-stages: [build]
+stages: [build, test, publish]
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -7,20 +7,13 @@ workflow:
     - if: '$CI_COMMIT_BRANCH'
     - if: '$CI_COMMIT_TAG'
 default:
-  image: docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d
-  services:
-    - name: docker:28-dind
-      alias: docker
-      command: ["--tls=false"]
   interruptible: true
-variables:
-  DOCKER_HOST: tcp://docker:2375
-  DOCKER_TLS_CERTDIR: ""
-  DOCKER_DRIVER: overlay2
-  DOCKER_BUILDKIT: "1"
-  HEALTHCHECK_TCP_PORT: "2375"
-build-and-test:
+
+build:
   stage: build
+  image:
+    name: ghcr.io/osscontainertools/kaniko:v1.28.6-debug@sha256:7ab44d0131c3051b6dea128067e258c7afb5c4815082a93b9cf6c624f2140bf0
+    entrypoint: [""]
   parallel:
     matrix:
       - FLAVOR: slim
@@ -28,25 +21,37 @@ build-and-test:
       - FLAVOR: alpine
         PYTHON_IMAGE: python:3.12-alpine3.23@sha256:1fd55c2f838c4f76262f9eeed899ff9168ea96ac383c61667d6f204325e1f169
   before_script:
-    - docker info
-    - printf '%s' "$CI_REGISTRY_PASSWORD" | docker login --username "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - mkdir -p /kaniko/.docker
+    - REGISTRY_AUTH=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
+    - printf '{"auths":{"%s":{"auth":"%s"}}}' "$CI_REGISTRY" "$REGISTRY_AUTH" > /kaniko/.docker/config.json
   script:
-    - export IMAGE="$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA-$FLAVOR"
-    - docker build --pull --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" --build-arg "VCS_REF=$CI_COMMIT_SHA" --build-arg "SOURCE_URL=$CI_PROJECT_URL" --tag "$IMAGE" .
-    - docker run --rm --network none "$IMAGE" openstack-client-check
-    - docker run --rm --network none "$IMAGE" /bin/bash --login -c 'openstack --version && test "$(id -u)" = 1000'
-    - |
-      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] || [ -n "$CI_COMMIT_TAG" ]; then
-        docker push "$IMAGE"
-        docker tag "$IMAGE" "$CI_REGISTRY_IMAGE:$FLAVOR"
-        docker push "$CI_REGISTRY_IMAGE:$FLAVOR"
-        if [ "$FLAVOR" = slim ]; then
-          docker tag "$IMAGE" "$CI_REGISTRY_IMAGE:latest"
-          docker push "$CI_REGISTRY_IMAGE:latest"
-        fi
-        if [ -n "$CI_COMMIT_TAG" ]; then
-          docker tag "$IMAGE" "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG-$FLAVOR"
-          docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG-$FLAVOR"
-        fi
-      fi
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" --build-arg "VCS_REF=$CI_COMMIT_SHA" --build-arg "SOURCE_URL=$CI_PROJECT_URL" --destination "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA-$FLAVOR" --digest-file "$CI_PROJECT_DIR/digest-$FLAVOR.txt" --cache=true --cache-repo "$CI_REGISTRY_IMAGE/cache"
+  artifacts:
+    paths: ["digest-*.txt"]
+    expire_in: 30 days
   timeout: 45m
+
+test:
+  stage: test
+  image:
+    name: $CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA-$FLAVOR
+    entrypoint: [""]
+  parallel:
+    matrix:
+      - FLAVOR: [slim, alpine]
+  script:
+    - openstack-client-check
+    - /bin/bash --login -c 'openstack --version && test "$(id -u)" = 1000'
+  timeout: 10m
+
+publish:
+  stage: publish
+  image:
+    name: $CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA-slim
+    entrypoint: [""]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - python scripts/publish.py
+  timeout: 10m
