@@ -43,4 +43,6 @@ ENV PATH="/opt/openstack/bin:${PATH}" \
     PIP_DISABLE_PIP_VERSION_CHECK="1"
 USER 1000:1000
 WORKDIR /home/cloudshell
+RUN openstack-client-check \
+    && /bin/bash --login -c 'openstack --version && test "$(id -u)" = 1000'
 CMD ["/bin/bash", "--login"]

@@ -68,3 +68,13 @@ uv pip compile --python-version 3.12 --generate-hashes \
 After updating, run both CI variants and validate a temporary Zun container
 against the deployed OpenStack release, including public WSS attach and
 authenticated read-only CLI calls. Keep TLS verification enabled.
+
+## Registry outage recovery
+
+When the registry is unavailable, run a pipeline with `BUILD_ARCHIVES_ONLY=true`.
+Both Dockerfile variants run the runtime checks during their build, and CI
+uploads gzip-compressed `docker load` archives and SHA-256 checksums to GitLab
+Packages (`cloudshell-images/<full-commit>`). Download with an authenticated
+GitLab Packages request, verify the checksum, and use `docker load` to import.
+Registry-based test and tag-promotion jobs are skipped in this recovery mode.
+Rerun a normal pipeline after the registry is repaired to publish the image tags.
