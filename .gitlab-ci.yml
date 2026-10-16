@@ -26,21 +26,13 @@ build:
     - printf '{"auths":{"%s":{"auth":"%s"}}}' "$CI_REGISTRY" "$REGISTRY_AUTH" > /kaniko/.docker/config.json
   script:
     - |
-      set -- --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
+      /kaniko/executor \
+        --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" \
         --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" --build-arg "VCS_REF=$CI_COMMIT_SHA" \
         --build-arg "SOURCE_URL=$CI_PROJECT_URL" \
         --destination "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA-$FLAVOR" \
-        --digest-file "$CI_PROJECT_DIR/digest-$FLAVOR.txt"
-      if [ "$BUILD_ARCHIVES_ONLY" = "true" ]; then
-        set -- "$@" --no-push --no-push-cache --tar-path "$CI_PROJECT_DIR/openstack-client-$FLAVOR.tar"
-      else
-        set -- "$@" --cache=true --cache-repo "$CI_REGISTRY_IMAGE/cache"
-      fi
-      /kaniko/executor "$@"
-      if [ "$BUILD_ARCHIVES_ONLY" = "true" ]; then
-        gzip "$CI_PROJECT_DIR/openstack-client-$FLAVOR.tar"
-        /opt/openstack/bin/python "$CI_PROJECT_DIR/scripts/upload_archive.py"
-      fi
+        --digest-file "$CI_PROJECT_DIR/digest-$FLAVOR.txt" \
+        --cache=true --cache-repo "$CI_REGISTRY_IMAGE/cache"
   artifacts:
     paths: ["digest-*.txt"]
     expire_in: 30 days
@@ -54,10 +46,6 @@ test:
   parallel:
     matrix:
       - FLAVOR: [slim, alpine]
-  rules:
-    - if: '$BUILD_ARCHIVES_ONLY == "true"'
-      when: never
-    - when: on_success
   script:
     - openstack-client-check
     - /bin/bash --login -c 'openstack --version && test "$(id -u)" = 1000'
@@ -69,8 +57,6 @@ publish:
     name: $CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA-slim
     entrypoint: [""]
   rules:
-    - if: '$BUILD_ARCHIVES_ONLY == "true"'
-      when: never
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - if: '$CI_COMMIT_TAG'
   script:

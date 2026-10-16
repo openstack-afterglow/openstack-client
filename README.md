@@ -28,6 +28,10 @@ non-root operation, writable home and 13 CLI command groups. Only after both
 tests pass are default-branch builds promoted to `slim`, `alpine` and `latest`.
 Release tags publish `<release>-<flavor>`. Pin the published digest in production.
 
+Registry publishing is mandatory for every build. A registry upload failure
+fails the pipeline; tests and tag promotion cannot report success without
+published images. No archive-only project variable can bypass publishing.
+
 The inherited `alpine/`, `centos/`, `fedora/` and `ubuntu/` directories preserve
 the original 2017 recipes. The maintained build uses the root `Dockerfile`.
 
@@ -69,12 +73,8 @@ After updating, run both CI variants and validate a temporary Zun container
 against the deployed OpenStack release, including public WSS attach and
 authenticated read-only CLI calls. Keep TLS verification enabled.
 
-## Registry outage recovery
+## Registry failures
 
-When the registry is unavailable, run a pipeline with `BUILD_ARCHIVES_ONLY=true`.
-Both Dockerfile variants run the runtime checks during their build, and CI
-uploads gzip-compressed `docker load` archives and SHA-256 checksums to GitLab
-Packages (`cloudshell-images/<full-commit>`). Download with an authenticated
-GitLab Packages request, verify the checksum, and use `docker load` to import.
-Registry-based test and tag-promotion jobs are skipped in this recovery mode.
-Rerun a normal pipeline after the registry is repaired to publish the image tags.
+If the registry rejects uploads, repair the registry and retry the failed
+pipeline. Previously generated archives in GitLab Packages are historical
+build outputs; new pipelines publish container images directly to the registry.
