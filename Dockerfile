@@ -11,15 +11,19 @@ RUN python -m venv /opt/openstack
 COPY requirements.lock /tmp/requirements.lock
 RUN /opt/openstack/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements.lock \
     && /opt/openstack/bin/pip check
+COPY bootstrap/bootstrap_launcher.c /tmp/bootstrap_launcher.c
+RUN cc -O2 -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+      -fPIE -pie -Wl,-z,relro,-z,now,-z,noexecstack \
+      -o /tmp/afterglow-cloud-shell-bootstrap /tmp/bootstrap_launcher.c
 FROM ${PYTHON_IMAGE} AS runtime
 ARG VCS_REF=local
-ARG SOURCE_URL=https://git.dmslab.re.kr/system/openstack/openstack-client
+ARG SOURCE_URL=https://github.com/openstack-afterglow/openstack-client
 LABEL org.opencontainers.image.title="DMS OpenStack Cloud Shell" \
       org.opencontainers.image.description="Python 3.12 OpenStack CLI with TLS 1.3 and Zun support" \
       org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.revision="${VCS_REF}"
 RUN if command -v apk >/dev/null; then \
-      apk add --no-cache bash bash-completion ca-certificates curl bind-tools git iproute2 iputils jq less openssh-client openssl procps tini util-linux \
+      apk add --no-cache bash bash-completion ca-certificates curl bind-tools git iproute2 iputils jq less openssh-client openssl procps tini util-linux setpriv \
       && addgroup -g 1000 cloudshell \
       && adduser -D -u 1000 -G cloudshell -h /home/cloudshell -s /bin/bash cloudshell; \
     else \
@@ -31,6 +35,12 @@ RUN if command -v apk >/dev/null; then \
     && mkdir -p /workspace /home/cloudshell/.stack /home/cloudshell/.config/openstack \
     && chown -R 1000:1000 /workspace /home/cloudshell
 COPY --from=builder /opt/openstack /opt/openstack
+COPY --from=builder --chown=0:0 --chmod=4755 /tmp/afterglow-cloud-shell-bootstrap /usr/local/bin/afterglow-cloud-shell-bootstrap
+COPY --chown=0:0 --chmod=0644 bootstrap/bootstrap.py /usr/local/libexec/afterglow-cloud-shell-bootstrap.py
+COPY --chown=0:0 --chmod=0644 LICENSE.afterglow /usr/local/share/licenses/afterglow-cloud-shell/LICENSE
+RUN test -x /bin/setpriv \
+    && test "$(stat -c '%u:%g:%a' /usr/local/bin/afterglow-cloud-shell-bootstrap)" = 0:0:4755 \
+    && test "$(stat -c '%u:%g:%a' /usr/local/libexec/afterglow-cloud-shell-bootstrap.py)" = 0:0:644
 COPY --chmod=0644 scripts/profile.sh /etc/profile.d/openstack-client.sh
 COPY --chmod=0755 scripts/stack /usr/local/bin/stack
 COPY --chmod=0755 scripts/check.py /usr/local/bin/openstack-client-check

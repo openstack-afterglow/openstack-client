@@ -1,0 +1,11 @@
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+*.env
+.env
+clouds.yaml
+secure.yaml
+*-openrc*
+reports/
+image-*.tar.gz

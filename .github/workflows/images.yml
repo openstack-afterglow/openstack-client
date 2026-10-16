@@ -1,0 +1,150 @@
+name: Build and publish Cloud Shell images
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/openstack-afterglow/openstack-client
+
+jobs:
+  build-test:
+    name: ${{ matrix.flavor }} / ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [slim, alpine]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - flavor: slim
+            base: python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+          - flavor: alpine
+            base: python:3.12-alpine3.23@sha256:1fd55c2f838c4f76262f9eeed899ff9168ea96ac383c61667d6f204325e1f169
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Source PTY regressions (standard library only)
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Build native architecture without publishing
+        env:
+          ARCH: ${{ matrix.arch }}
+          FLAVOR: ${{ matrix.flavor }}
+          BASE: ${{ matrix.base }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *) echo 'Runner architecture does not match the requested image' >&2; exit 1 ;;
+          esac
+          docker buildx build --load --platform "linux/$ARCH" \
+            --build-arg "PYTHON_IMAGE=$BASE" --build-arg "VCS_REF=$GITHUB_SHA" \
+            --tag "openstack-client:$FLAVOR-$ARCH" .
+      - name: Offline CLI and real setuid PTY bootstrap smoke
+        env:
+          ARCH: ${{ matrix.arch }}
+          FLAVOR: ${{ matrix.flavor }}
+        run: python3 tests/image_smoke.py "openstack-client:$FLAVOR-$ARCH" --platform "linux/$ARCH"
+      - name: Export exactly the tested image for trusted publication
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          ARCH: ${{ matrix.arch }}
+          FLAVOR: ${{ matrix.flavor }}
+        run: docker save "openstack-client:$FLAVOR-$ARCH" | gzip > "image-$FLAVOR-$ARCH.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        with:
+          name: image-${{ matrix.flavor }}-${{ matrix.arch }}
+          path: image-${{ matrix.flavor }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  publish:
+    name: Publish only after all four runtime gates
+    needs: build-test
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: ghcr-publication
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      packages: write
+    steps:
+      # No source checkout or build runs in the job holding registry credentials.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: image-*
+          merge-multiple: true
+          path: images
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish tested revision candidates
+        run: |
+          set -euo pipefail
+          revision="sha-$GITHUB_SHA-run-$GITHUB_RUN_ID-attempt-$GITHUB_RUN_ATTEMPT"
+          for flavor in slim alpine; do
+            for arch in amd64 arm64; do
+              gzip -dc "images/image-$flavor-$arch.tar.gz" | docker load
+              ref="$IMAGE:$revision-$flavor-$arch"
+              docker tag "openstack-client:$flavor-$arch" "$ref"
+              docker push "$ref"
+              digest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))')
+              printf '%s@%s\n' "$IMAGE" "$digest" > "digest-$flavor-$arch.txt"
+            done
+          done
+          for flavor in slim alpine; do
+            ref="$IMAGE:$revision-$flavor"
+            docker buildx imagetools create --tag "$ref" "$(cat "digest-$flavor-amd64.txt")" "$(cat "digest-$flavor-arm64.txt")"
+            descriptor=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}')
+            jq -e '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort == ["amd64", "arm64"]' <<< "$descriptor"
+            digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$descriptor")
+            printf '%s@%s\n' "$IMAGE" "$digest" > "digest-$flavor.txt"
+            printf '### %s\n\nCandidate: %s\n\nManifest: %s@%s\n\n' "$flavor" "$ref" "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Promote tested digests to channels or release aliases
+        run: |
+          set -euo pipefail
+          slim=$(cat digest-slim.txt)
+          alpine=$(cat digest-alpine.txt)
+          if [ "$GITHUB_REF" = refs/heads/main ]; then
+            docker buildx imagetools create --tag "$IMAGE:slim" --tag "$IMAGE:latest" "$slim"
+            docker buildx imagetools create --tag "$IMAGE:alpine" "$alpine"
+          else
+            # A tag is data, never interpolated directly into shell source.
+            case "$GITHUB_REF_NAME" in
+              v[0-9]*) ;;
+              *) echo 'Unsupported release tag' >&2; exit 1 ;;
+            esac
+            docker buildx imagetools create --tag "$IMAGE:$GITHUB_REF_NAME-slim" --tag "$IMAGE:$GITHUB_REF_NAME" "$slim"
+            docker buildx imagetools create --tag "$IMAGE:$GITHUB_REF_NAME-alpine" "$alpine"
+          fi
+      - name: Remove registry session
+        if: always()
+        run: docker logout ghcr.io
