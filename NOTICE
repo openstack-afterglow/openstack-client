@@ -1,0 +1,53 @@
+OpenStack Cloud Shell client
+https://github.com/openstack-afterglow/openstack-client
+
+Provenance and changes
+----------------------
+This is an enhanced and maintained DMS version of Gerard Braad's
+openstack-client: https://gitlab.com/gbraad/openstack-client
+The retained upstream history ends at d332a95c8e0180d82f248cd17b6fae81e6e27b67;
+the subsequent DMS GitLab source revision is 434529e.
+Upstream also acknowledged Lars Kellogg-Stedman's OpenStack Tools
+(https://github.com/larsks/openstack-tools) and GitLab's infrastructure.
+
+Maintained changes include Python 3.12/OpenSSL 3, hash-locked OpenStack CLI
+plugins, a non-root Cloud Shell with tmpfs credential bootstrap, and native
+amd64/arm64 CI with gated GHCR publication.
+
+Licensing scope
+---------------
+The project owner licenses this maintained project's own original
+contributions under the Apache License, Version 2.0, reproduced verbatim in
+LICENSE. This covers the owner's original maintenance/build/CI/documentation
+work only to the extent the owner holds the necessary rights, and excludes
+inherited upstream material and the MIT-covered files identified below.
+The owner's choice follows Kolla Ansible stable/2025.2's Apache-2.0 license;
+it is not a license grant from Kolla or from the original upstream author.
+
+The copied Afterglow bootstrap C/Python code in bootstrap/ and migrated tests
+in tests/ remain under the MIT grant in LICENSE.afterglow:
+Copyright (c) 2026 봉정근
+That grant and all existing copyright and attribution notices are retained.
+
+No explicit license grant was found for Gerard Braad's original
+openstack-client material in the reachable upstream repository metadata,
+master tree/README, or the supplied local license-file history. In particular,
+GitLab project 1348805 reports license=null and license_url=null, and its
+master tree contains no LICENSE, COPYING or NOTICE file. Public availability
+is not permission to relicense that material. Its license remains unresolved;
+this project's Apache-2.0 selection does not cure that gap or relicense the
+retained Git history, original recipes or other inherited material.
+
+Third-party dependencies and base-image packages retain their respective
+licenses. This NOTICE does not assert that the entire image is licensed only
+under Apache-2.0 and MIT. Any image license label summarizes this project's
+known grants, not complete dependency licensing or upstream clearance.
+
+Evidence:
+https://www.apache.org/licenses/LICENSE-2.0.txt
+https://opendev.org/openstack/kolla-ansible/src/branch/stable/2025.2/LICENSE
+https://gitlab.com/api/v4/projects/1348805?license=true
+https://gitlab.com/api/v4/projects/1348805/repository/tree?recursive=true&per_page=100
+https://gitlab.com/gbraad/openstack-client/-/blob/master/README.md
+
+This NOTICE records provenance and scope; it does not modify any license.

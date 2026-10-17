@@ -1,15 +1,17 @@
 # OpenStack Cloud Shell client
 
-Maintained DMS fork of <https://gitlab.com/gbraad/openstack-client>, retaining its
-Git history at upstream commit `d332a95c8e0180d82f248cd17b6fae81e6e27b67` and the
-updated GitLab source at `434529e`. The maintained source and GHCR build owner is
+Enhanced and maintained DMS version of Gerard Braad's original
+<https://gitlab.com/gbraad/openstack-client>, retaining its Git history at upstream
+commit `d332a95c8e0180d82f248cd17b6fae81e6e27b67` and the updated DMS GitLab source
+at `434529e`. The maintained source and GHCR build owner is
 <https://github.com/openstack-afterglow/openstack-client>. The GitLab origin and
 its independent publication pipeline remain available; GitLab is not the GHCR
 publication path.
 
-The image retains Python 3.12, OpenSSL 3, the hashed CLI dependency lock and Zun,
-Barbican, Designate, Heat, Magnum, Manila, Octavia, Swift, Trove and Placement
-plugins. The default user is `cloudshell` (UID/GID 1000), with persistent home
+The maintained changes include Python 3.12, OpenSSL 3, a hashed CLI dependency
+lock with Zun, Barbican, Designate, Heat, Magnum, Manila, Octavia, Swift, Trove
+and Placement plugins, a non-root tmpfs credential bootstrap, and native
+amd64/arm64 CI with gated GHCR publication. The default user is `cloudshell` (UID/GID 1000), with persistent home
 `/home/cloudshell` and isolated CLI environment `/opt/openstack`. The default
 command remains `/bin/bash --login`, not a daemon. Generic CLI users can supply
 `clouds.yaml`, OpenRC or environment variables at runtime. No credentials belong
@@ -21,11 +23,20 @@ Canonical registry: `ghcr.io/openstack-afterglow/openstack-client`
 
 | Tag | Base | Platforms |
 | --- | --- | --- |
-| `latest`, `slim` | Python 3.12 / Debian Trixie (default) | `linux/amd64`, `linux/arm64` |
-| `alpine` | Python 3.12 / Alpine 3.23 | `linux/amd64`, `linux/arm64` |
+| `2025.2`, `2025.2-slim`, `latest`, `slim` | Python 3.12 / Debian Trixie (default) | `linux/amd64`, `linux/arm64` |
+| `2025.2-alpine`, `alpine` | Python 3.12 / Alpine 3.23 | `linux/amd64`, `linux/arm64` |
 | `sha-<full-commit>-run-<run-id>-attempt-<attempt>-<flavor>` | Run-unique tested revision manifest | Both platforms |
 | `sha-<full-commit>-run-<run-id>-attempt-<attempt>-<flavor>-<arch>` | Run-unique tested architecture candidate | Named architecture |
 | `v<release>`, `v<release>-slim`, `v<release>-alpine` | Release tag aliases; unqualified release is Debian | Both platforms |
+
+The `2025.2` family is a **moving compatibility channel**, not an immutable
+release. Only publication from `main` updates these channels (and the generic
+`latest`/`slim`/`alpine` channels). A `v<release>` publication updates only its
+version aliases; it must not move any moving channel, including `2025.2`.
+The declared OpenStack series/compatibility label describes the target cloud
+series. It is neither the Kolla Ansible binary version nor proof of live
+compatibility. A deployment can report a different Kolla Ansible package version;
+only a live check against that deployment establishes interoperability.
 
 The GitHub Actions workflow builds all four combinations on native GitHub Linux
 runners (`ubuntu-24.04`, `ubuntu-24.04-arm`). Every combination must pass source
@@ -42,10 +53,12 @@ main or such tags can publish. A separate package-write job loads the exact four
 successfully tested image archives; it does not rebuild or check out source.
 It pushes run-unique full-revision architecture candidates, resolves their exact
 registry digests, creates a checked multiarchitecture manifest from those digests,
-then promotes its digest to channels on main or version aliases on tags. A rebuild
-at the same source SHA uses a different run/attempt reference rather than
-overwriting a previous commit candidate.
-Release tags do not change `latest`. Action revisions are pinned by full commit.
+then promotes its digest to channels on main or version aliases on tags. The
+publication gate also checks registry digests, logs out and performs anonymous
+pulls and CLI checks; an authenticated push alone does not establish public
+pullability. A rebuild at the same source SHA uses a different run/attempt
+reference rather than overwriting a previous commit candidate.
+Release tags do not change moving channels. Action revisions are pinned by full commit.
 
 Run-unique revision tags are never reused by this workflow. Registry owners can
 still retag them manually; use the published **manifest digest**, not a tag, for
@@ -60,44 +73,40 @@ amd64 path and CLI gates. It does not provide the GitHub all-four/runtime gate.
 The inherited `alpine/`, `centos/`, `fedora/` and `ubuntu/` directories preserve
 2017 recipes; only the root `Dockerfile` is maintained.
 
-## Private registry operations
+## Public registry operations
 
-The GitHub source repository is private; keep the initial GHCR package private
-and verify its actual ACL after first publication. Org package creation policy
-must permit this repository's `GITHUB_TOKEN` to publish, and the
-package must grant the repository Actions access. The workflow uses only its
-job-scoped token (`packages: write` in the publication job); no personal access
-token is needed in Actions and no credentials are passed as build arguments.
-Native arm64 runners and sufficient Actions/artifact quota must be available to
-the private repository. Missing runner access is a failed/queued gate, not a
-reason to skip arm64.
+The GitHub source repository and canonical GHCR package are intentionally public
+by the owner's explicit publication decision. Public GHCR pulls are anonymous:
+operators do not need a GitHub account, a personal access token or `docker login`.
+Repository visibility and package visibility are separate settings; the owner
+selects **Public** in the GHCR package settings, and publication must pass the
+anonymous pull gate. A public source repository alone does not prove a package's
+ACL or that a particular new tag has been published.
 
-For an operator pull, use a separately authorized registry identity with only
-`read:packages` and required org authorization, via Docker's credential store or
-`docker login ghcr.io --password-stdin`. Never put registry secrets in Git,
-Cloud Shell settings, browser code, shell history, image layers or CLI payloads.
-Repository visibility and package visibility are separate; verify the actual
-package ACL rather than assuming that a private source repository permits a
-compute host to pull.
+Actions still requires job-scoped `GITHUB_TOKEN` authorization to push
+(`packages: write` in the publication job), package creation permission and
+repository Actions access to the package. No personal access token is needed
+in Actions and no credentials are passed as build arguments. Native arm64
+runners and sufficient Actions/artifact quota must be available. Missing runner
+access is a failed/queued gate, not a reason to skip arm64.
 
-For private Zun pulls, create/manage the registry credential using Zun's own
-registry service with an approved read-only identity. Configure Afterglow's
-optional Cloud Shell registry ID to select that Zun-owned entry. The Zun API
-create field is `registry` (registry responses use `registry_id`). Configure the
-canonical image or validated digest independently; `image_pull_policy` is
-optional (`always`, `ifnotpresent`, `never`) and explicit policy selection may
-require an administrator under stock Zun policy. An unset policy leaves the
-field out. A missing/inaccessible image must fail normally; there is no fallback
-image. This repository does not configure live tenant registries or credentials.
+For Zun, select the canonical public image or a validated digest and leave the
+optional Afterglow Cloud Shell registry ID unset: no Zun registry credential is
+needed for an anonymous GHCR pull. `image_pull_policy` is optional (`always`,
+`ifnotpresent`, `never`) and explicit selection may require an administrator under
+stock Zun policy. An unset policy leaves the field out. A missing/inaccessible
+image must fail normally; there is no fallback image. Never put registry or
+cloud secrets in Git, browser code, image layers or CLI payload logs.
 
 ## Use
 
-After authorized registry login when required:
+Pull anonymously and start a shell (no registry login):
 
 ```sh
+docker pull ghcr.io/openstack-afterglow/openstack-client:2025.2
 docker run --rm -it \
   -v "$HOME/.config/openstack:/home/cloudshell/.config/openstack:ro" \
-  ghcr.io/openstack-afterglow/openstack-client:slim
+  ghcr.io/openstack-afterglow/openstack-client:2025.2
 openstack --os-cloud mycloud server list
 stack mycloud server list
 ```
@@ -193,6 +202,10 @@ persistent-home replacement and absence of a token in the replacement container
 before the next bootstrap. Its cleanup is limited to uniquely named smoke
 containers and their dedicated volume.
 
+The non-root build gate also requires the project Apache license, NOTICE and
+retained MIT notice to be readable as UID 1000. License directories are mode0755
+and notice files mode0644; a successful root-only file read is not sufficient.
+
 Base image manifests remain digest-pinned. `requirements.in` pins direct CLI
 dependencies and `requirements.lock` pins all Python dependencies with hashes.
 For an intentional dependency refresh only:
@@ -209,17 +222,51 @@ on. Offline source/image tests do not establish live registry or cloud acceptanc
 
 ## Source audit and license status
 
-The current tracked source has no embedded production registry/cloud credentials
-identified in the targeted pre-upload review. CI credential references are
-runtime variables. Historical 2017 README commits contain literal username and
-password examples; whether those ever represented live credentials is unknown.
-Retained history must not be described as secret-free or made public without an
-owner decision and appropriate historical-secret review. History was not rewritten.
+The targeted pre-upload review identified no embedded production registry/cloud
+credentials in the current tracked source; this is not a claim that all retained
+history is secret-free. CI credential references are runtime variables.
+Historical README username/password examples were introduced in **2016**, including
+[`0e889137` (2016-07-17)](https://gitlab.com/gbraad/openstack-client/-/commit/0e88913720fda76fab4befe63985771b6041d6f5).
+Whether those examples ever represented live credentials, or are valid now, is
+unknown; no live validity assertion is made. The owner explicitly chose public
+publication with the retained history and this disclosed risk. History was not
+rewritten. That decision does not establish original-author licensing permission.
 
-No repository-level LICENSE or explicit license grant was found for the supplied
-original openstack-client tree/history; this migration does not relicense it.
-The copied Afterglow bootstrap C/Python code and migrated tests retain their MIT
-notice in `LICENSE.afterglow` (copyright 2026 봉정근). The runtime image includes
-that notice at `/usr/local/share/licenses/afterglow-cloud-shell/LICENSE`.
-Dependency licenses remain their respective owners' licenses. Keep the repository
-private pending an explicit licensing/publication decision for the original code.
+### License scope and upstream evidence
+
+The owner selects **Apache-2.0 for this maintained project's own original
+contributions**, excluding inherited material and the existing MIT-covered
+bootstrap/tests. The canonical Apache License 2.0 text is in [`LICENSE`](LICENSE);
+[`NOTICE`](NOTICE) records the exact scope and provenance. This choice follows
+[Kolla Ansible stable/2025.2's Apache-2.0 license](https://opendev.org/openstack/kolla-ansible/src/branch/stable/2025.2/LICENSE),
+not a grant of permission from Kolla or from the original openstack-client author.
+
+The reachable [upstream project metadata](https://gitlab.com/api/v4/projects/1348805?license=true)
+reports `license: null` and `license_url: null`. Its
+[master tree](https://gitlab.com/api/v4/projects/1348805/repository/tree?recursive=true&per_page=100)
+has no `LICENSE`, `COPYING` or `NOTICE`, and its
+[README](https://gitlab.com/gbraad/openstack-client/-/blob/master/README.md)
+contains attribution but no explicit license grant. The supplied local
+license-file history likewise yielded no original upstream grant. These bounded
+checks do not prove that permission exists nowhere; **the original upstream
+material's license remains unresolved**. Public hosting is not a license grant.
+The owner cannot relicense other authors' work by selecting Apache-2.0; obtain
+the rights holders' grant before treating the inherited material as cleared for
+redistribution. Neither retained history nor third-party dependencies is relicensed.
+
+The copied Afterglow bootstrap C/Python code in `bootstrap/` and migrated tests in
+`tests/` retain their MIT grant in [`LICENSE.afterglow`](LICENSE.afterglow)
+(Copyright (c) 2026 봉정근). All existing copyright notices are retained.
+Upstream credits Gerard Braad as author, Lars Kellogg-Stedman's
+[OpenStack Tools](https://github.com/larsks/openstack-tools), and GitLab's
+infrastructure; this maintained version preserves that attribution in `NOTICE`.
+
+Runtime license notices are installed at
+`/usr/local/share/licenses/openstack-client/LICENSE` and
+`/usr/local/share/licenses/openstack-client/NOTICE`; the existing MIT notice stays
+at `/usr/local/share/licenses/afterglow-cloud-shell/LICENSE`. The OCI
+`org.opencontainers.image.licenses="Apache-2.0 AND MIT"` label summarizes this
+project's known grants only: it is not clearance for unresolved inherited work
+or a complete license inventory for the base image and dependencies. Those
+components retain their respective owners' licenses.
+
