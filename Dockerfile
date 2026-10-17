@@ -21,6 +21,7 @@ ARG SOURCE_URL=https://github.com/openstack-afterglow/openstack-client
 LABEL org.opencontainers.image.title="DMS OpenStack Cloud Shell" \
       org.opencontainers.image.description="Python 3.12 OpenStack CLI with TLS 1.3 and Zun support" \
       org.opencontainers.image.source="${SOURCE_URL}" \
+      org.opencontainers.image.licenses="Apache-2.0 AND MIT" \
       org.opencontainers.image.revision="${VCS_REF}"
 RUN if command -v apk >/dev/null; then \
       apk add --no-cache bash bash-completion ca-certificates curl bind-tools git iproute2 iputils jq less openssh-client openssl procps tini util-linux setpriv \
@@ -38,7 +39,9 @@ COPY --from=builder /opt/openstack /opt/openstack
 COPY --from=builder --chown=0:0 --chmod=4755 /tmp/afterglow-cloud-shell-bootstrap /usr/local/bin/afterglow-cloud-shell-bootstrap
 COPY --chown=0:0 --chmod=0644 bootstrap/bootstrap.py /usr/local/libexec/afterglow-cloud-shell-bootstrap.py
 COPY --chown=0:0 --chmod=0644 LICENSE.afterglow /usr/local/share/licenses/afterglow-cloud-shell/LICENSE
-RUN test -x /bin/setpriv \
+COPY --chown=0:0 --chmod=0644 LICENSE NOTICE /usr/local/share/licenses/openstack-client/
+RUN chmod 0755 /usr/local/share/licenses /usr/local/share/licenses/afterglow-cloud-shell /usr/local/share/licenses/openstack-client \
+    && test -x /bin/setpriv \
     && test "$(stat -c '%u:%g:%a' /usr/local/bin/afterglow-cloud-shell-bootstrap)" = 0:0:4755 \
     && test "$(stat -c '%u:%g:%a' /usr/local/libexec/afterglow-cloud-shell-bootstrap.py)" = 0:0:644
 COPY --chmod=0644 scripts/profile.sh /etc/profile.d/openstack-client.sh
@@ -54,5 +57,8 @@ ENV PATH="/opt/openstack/bin:${PATH}" \
 USER 1000:1000
 WORKDIR /home/cloudshell
 RUN openstack-client-check \
+    && test -r /usr/local/share/licenses/openstack-client/LICENSE \
+    && test -r /usr/local/share/licenses/openstack-client/NOTICE \
+    && test -r /usr/local/share/licenses/afterglow-cloud-shell/LICENSE \
     && /bin/bash --login -c 'openstack --version && test "$(id -u)" = 1000'
 CMD ["/bin/bash", "--login"]

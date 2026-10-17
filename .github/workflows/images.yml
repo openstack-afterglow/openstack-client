@@ -20,6 +20,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/openstack-afterglow/openstack-client
+  OPENSTACK_SERIES: '2025.2'
 
 jobs:
   build-test:
@@ -134,8 +135,9 @@ jobs:
           slim=$(cat digest-slim.txt)
           alpine=$(cat digest-alpine.txt)
           if [ "$GITHUB_REF" = refs/heads/main ]; then
-            docker buildx imagetools create --tag "$IMAGE:slim" --tag "$IMAGE:latest" "$slim"
-            docker buildx imagetools create --tag "$IMAGE:alpine" "$alpine"
+            docker buildx imagetools create --tag "$IMAGE:slim" --tag "$IMAGE:latest" \
+              --tag "$IMAGE:$OPENSTACK_SERIES" --tag "$IMAGE:$OPENSTACK_SERIES-slim" "$slim"
+            docker buildx imagetools create --tag "$IMAGE:alpine" --tag "$IMAGE:$OPENSTACK_SERIES-alpine" "$alpine"
           else
             # A tag is data, never interpolated directly into shell source.
             case "$GITHUB_REF_NAME" in
@@ -145,6 +147,29 @@ jobs:
             docker buildx imagetools create --tag "$IMAGE:$GITHUB_REF_NAME-slim" --tag "$IMAGE:$GITHUB_REF_NAME" "$slim"
             docker buildx imagetools create --tag "$IMAGE:$GITHUB_REF_NAME-alpine" "$alpine"
           fi
+      - name: Verify promoted compatibility channels
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          for flavor in slim alpine; do
+            expected=$(cat "digest-$flavor.txt")
+            expected=${expected##*@}
+            tags="$OPENSTACK_SERIES-$flavor"
+            if [ "$flavor" = slim ]; then tags="$OPENSTACK_SERIES $tags"; fi
+            for tag in $tags; do
+              actual=$(docker buildx imagetools inspect "$IMAGE:$tag" --format '{{json .Manifest}}' | jq -er '.digest')
+              test "$actual" = "$expected"
+              printf 'Verified compatibility reference: %s:%s@%s\n\n' "$IMAGE" "$tag" "$actual" >> "$GITHUB_STEP_SUMMARY"
+            done
+          done
       - name: Remove registry session
         if: always()
         run: docker logout ghcr.io
+      - name: Verify anonymous compatibility image pulls
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          for tag in "$OPENSTACK_SERIES" "$OPENSTACK_SERIES-slim" "$OPENSTACK_SERIES-alpine"; do
+            docker pull "$IMAGE:$tag"
+            docker run --rm --pull never --network none "$IMAGE:$tag" openstack --version
+          done
